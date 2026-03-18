@@ -1,0 +1,19 @@
+{
+  "name": "f1-grand-prix-analytics",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:data": "node scripts/build-data.mjs",
+    "build:pages": "node scripts/build-pages.mjs",
+    "build": "npm.cmd run build:data && npm.cmd run build:pages && vite build",
+    "dev": "npm.cmd run build:data && npm.cmd run build:pages && vite --host",
+    "preview": "vite preview --host"
+  },
+  "dependencies": {
+    "chart.js": "^4.5.1"
+  },
+  "devDependencies": {
+    "vite": "^7.1.12"
+  }
+}
