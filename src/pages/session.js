@@ -1,14 +1,4 @@
-import {
-  formatCompound,
-  formatDelta,
-  formatDuration,
-  formatGap,
-  formatPoints,
-  formatRaceDate,
-  formatSeconds,
-  formatTemperature,
-  getSessionDetails,
-} from '../lib/data.js';
+import { formatDelta, formatDuration, formatGap, formatPoints, formatRaceDate, formatTemperature, getSessionDetails } from '../lib/data.js';
 import {
   mountBestSectorsChart,
   mountConsistencyChart,
@@ -28,6 +18,222 @@ import {
 } from '../lib/charts.js';
 import { driverColor, escapeHtml, renderAvailabilityTone, renderStatusTone } from '../lib/dom.js';
 
+const chartGroups = [
+  {
+    id: 'all',
+    label: 'All charts',
+    subtitle: 'Full analysis',
+    accent: '#f6b26b',
+  },
+  {
+    id: 'race-story',
+    label: 'Race story',
+    subtitle: 'Order, gaps and momentum',
+    title: 'Race story',
+    description: 'Follow how the order evolves, where gaps open up, and when the session changes pace.',
+    accent: '#ff7a59',
+  },
+  {
+    id: 'pace-tyres',
+    label: 'Pace and tyres',
+    subtitle: 'Speed, stints and degradation',
+    title: 'Pace and tyre behaviour',
+    description: 'Group together the speed references, stint structure and tyre life curves to read performance more naturally.',
+    accent: '#6fd3ff',
+  },
+  {
+    id: 'execution',
+    label: 'Execution',
+    subtitle: 'Stops, sectors and consistency',
+    title: 'Execution and efficiency',
+    description: 'Surface the operational charts that explain where time was won or lost over the weekend.',
+    accent: '#f7d65b',
+  },
+];
+
+const chartDefinitions = [
+  {
+    key: 'positions',
+    group: 'race-story',
+    navLabel: 'Positions',
+    eyebrow: 'Race story',
+    title: 'Driver positions by lap',
+    hint: 'Visible drivers are rebuilt into the chart state instead of being hidden with struck-through labels.',
+    transparencyKey: 'start-gain-loss',
+    accent: '#ff7a59',
+    canvasId: 'positions-chart',
+    mount: mountPositionChart,
+  },
+  {
+    key: 'gap',
+    group: 'race-story',
+    navLabel: 'Gap to leader',
+    eyebrow: 'Race story',
+    title: 'Gap to the leader',
+    hint: 'Gap traces inherit the same global driver filter and fullscreen interactions.',
+    transparencyKey: 'start-gain-loss',
+    accent: '#ff9b6a',
+    canvasId: 'gap-chart',
+    mount: mountGapChart,
+  },
+  {
+    key: 'lap-time',
+    group: 'race-story',
+    navLabel: 'Lap evolution',
+    eyebrow: 'Race story',
+    title: 'Lap time evolution',
+    hint: 'Neutralization periods are shaded to frame pace changes under green, VSC and Safety Car conditions.',
+    transparencyKey: 'pit-stop-time-loss',
+    accent: '#ff8a73',
+    canvasId: 'lap-time-chart',
+    mount: mountLapTimeEvolutionChart,
+  },
+  {
+    key: 'start-gain',
+    group: 'race-story',
+    navLabel: 'Start delta',
+    eyebrow: 'Race story',
+    title: 'Gain / loss at the start',
+    hint: 'Starting order is inferred from the earliest recorded position sample and compared with lap 1 order.',
+    transparencyKey: 'start-gain-loss',
+    accent: '#ffb366',
+    canvasId: 'start-gain-chart',
+    mount: mountStartGainChart,
+  },
+  {
+    key: 'neutralization',
+    group: 'race-story',
+    navLabel: 'SC and VSC',
+    eyebrow: 'Race story',
+    title: 'Safety Car / VSC impact',
+    hint: 'Average lap time by phase plus pit-stop count across the visible drivers.',
+    transparencyKey: 'pit-stop-time-loss',
+    accent: '#ffd369',
+    canvasId: 'neutralization-chart',
+    mount: mountNeutralizationImpactChart,
+  },
+  {
+    key: 'speed',
+    group: 'pace-tyres',
+    navLabel: 'Speed map',
+    eyebrow: 'Pace and tyres',
+    title: 'Top speed and representative corner speeds',
+    hint: 'Representative corner references were unavailable for this session.',
+    transparencyKey: 'corner-speed-references',
+    accent: '#6fd3ff',
+    canvasId: 'speed-chart',
+    mount: mountSpeedChart,
+  },
+  {
+    key: 'tyre-strategy',
+    group: 'pace-tyres',
+    navLabel: 'Tyre plan',
+    eyebrow: 'Pace and tyres',
+    title: 'Tyre usage and stint strategy',
+    hint: 'The compound letter and lap count are embedded in each visible stint block.',
+    transparencyKey: 'used-compounds',
+    accent: '#66d6a5',
+    customId: 'tyre-board',
+    kind: 'custom',
+  },
+  {
+    key: 'tyre-box',
+    group: 'pace-tyres',
+    navLabel: 'Stint spread',
+    eyebrow: 'Pace and tyres',
+    title: 'Tyre stint distribution by compound',
+    hint: 'Box-and-whisker view of stint lengths for compounds used by the current selection.',
+    transparencyKey: 'used-compounds',
+    accent: '#8ce0c4',
+    canvasId: 'tyre-box-chart',
+    mount: mountTyreBoxPlotChart,
+  },
+  {
+    key: 'stint-pace',
+    group: 'pace-tyres',
+    navLabel: 'Stint pace',
+    eyebrow: 'Pace and tyres',
+    title: 'Average pace per stint',
+    hint: 'Average representative lap time per stint, comparing drivers and compounds.',
+    transparencyKey: 'pit-stop-time-loss',
+    accent: '#75d7ff',
+    canvasId: 'stint-pace-chart',
+    mount: mountStintPaceChart,
+  },
+  {
+    key: 'degradation',
+    group: 'pace-tyres',
+    navLabel: 'Degradation',
+    eyebrow: 'Pace and tyres',
+    title: 'Tyre degradation',
+    hint: 'Compound curves aggregate representative green laps by tyre age for the visible drivers.',
+    transparencyKey: 'corner-speed-references',
+    accent: '#5dc8ff',
+    canvasId: 'degradation-chart',
+    mount: mountTyreDegradationChart,
+  },
+  {
+    key: 'pit-duration',
+    group: 'execution',
+    navLabel: 'Pit duration',
+    eyebrow: 'Execution',
+    title: 'Pit stop duration',
+    hint: 'Direct OpenF1 pit-lane duration. Stationary stop duration is available in tooltips when the source provides it.',
+    transparencyKey: 'pit-stop-duration',
+    accent: '#f7d65b',
+    canvasId: 'pit-duration-chart',
+    mount: mountPitDurationChart,
+  },
+  {
+    key: 'pit-loss',
+    group: 'execution',
+    navLabel: 'Pit loss',
+    eyebrow: 'Execution',
+    title: 'Pit stop time loss',
+    hint: 'Estimated from pit lap plus out lap versus nearby green-flag baseline laps.',
+    transparencyKey: 'pit-stop-time-loss',
+    accent: '#ffc16b',
+    canvasId: 'pit-loss-chart',
+    mount: mountPitLossChart,
+  },
+  {
+    key: 'best-sectors',
+    group: 'execution',
+    navLabel: 'Best sectors',
+    eyebrow: 'Execution',
+    title: 'Best sectors',
+    hint: 'Best sector times are taken from lap records and remain filter-aware.',
+    transparencyKey: 'track-temperature',
+    accent: '#ffae73',
+    canvasId: 'best-sectors-chart',
+    mount: mountBestSectorsChart,
+  },
+  {
+    key: 'consistency',
+    group: 'execution',
+    navLabel: 'Consistency',
+    eyebrow: 'Execution',
+    title: 'Driver consistency',
+    hint: 'Standard deviation is measured on representative green laps only.',
+    transparencyKey: 'corner-speed-references',
+    accent: '#f2df93',
+    canvasId: 'consistency-chart',
+    mount: mountConsistencyChart,
+  },
+  {
+    key: 'weather',
+    group: 'execution',
+    navLabel: 'Weather',
+    eyebrow: 'Execution',
+    title: 'Weather over the session',
+    hint: 'Track temperature, air temperature, wind and rainfall share the same timeline.',
+    transparencyKey: 'track-temperature',
+    accent: '#9ddcff',
+    canvasId: 'weather-chart',
+    mount: mountWeatherChart,
+  },
+];
+
 function getTransparency(session, key) {
   return session.transparency?.find((entry) => entry.key === key) ?? null;
 }
@@ -40,6 +246,14 @@ function buildAvailabilityBadge(session, key) {
   }
 
   return `<span class="availability-pill ${renderAvailabilityTone(item.availability)}">${escapeHtml(item.availability)}</span>`;
+}
+
+function chartsForGroup(groupId) {
+  if (groupId === 'all') {
+    return chartDefinitions;
+  }
+
+  return chartDefinitions.filter((chart) => chart.group === groupId);
 }
 
 function buildPanelHeader(session, eyebrow, title, hint, transparencyKey, expandable = true) {
@@ -203,10 +417,9 @@ function buildModalFilterControls(drivers) {
       ${drivers
         .map(
           (driver) => `
-            <label class="driver-toggle">
+            <label class="driver-toggle driver-toggle--code" title="${escapeHtml(driver.fullName)}">
               <input type="checkbox" data-driver-toggle="${driver.driverNumber}" />
               <span class="driver-chip" style="--driver-color:${driverColor(driver.teamColour)}">${driver.code}</span>
-              <span>${escapeHtml(driver.fullName)}</span>
             </label>
           `,
         )
@@ -225,6 +438,148 @@ function syncToggleGroup(toggleRoot, visibleDrivers) {
   }
 }
 
+function buildChartJumpButtons(activeGroup, activeChartKey) {
+  return chartsForGroup(activeGroup)
+    .map((chart) => {
+      const group = chartGroups.find((entry) => entry.id === chart.group);
+      const meta = activeGroup === 'all' && group ? `<span>${escapeHtml(group.label)}</span>` : '';
+      const isActive = chart.key === activeChartKey ? ' is-active' : '';
+
+      return `
+        <button
+          class="analytics-submenu__button${isActive}"
+          type="button"
+          data-chart-jump="${chart.key}"
+          style="--nav-accent:${chart.accent}"
+          aria-pressed="${chart.key === activeChartKey}"
+        >
+          <strong>${escapeHtml(chart.navLabel)}</strong>
+          ${meta}
+        </button>
+      `;
+    })
+    .join('');
+}
+
+function buildAnalyticsNavigator(activeGroup, activeChartKey, isCollapsed) {
+  const currentGroup = chartGroups.find((group) => group.id === activeGroup) ?? chartGroups[1];
+  const currentChart = chartDefinitions.find((chart) => chart.key === activeChartKey) ?? chartDefinitions[0];
+  const buttons = chartGroups
+    .map((group) => {
+      const isActive = group.id === activeGroup ? ' is-active' : '';
+      const count = chartsForGroup(group.id).length;
+
+      return `
+        <button
+          class="analytics-menu__button${isActive}"
+          type="button"
+          data-chart-group-button="${group.id}"
+          style="--nav-accent:${group.accent}"
+          aria-pressed="${group.id === activeGroup}"
+        >
+          <strong>${escapeHtml(group.label)}</strong>
+          <span>${count} ${count === 1 ? 'chart' : 'charts'} | ${escapeHtml(group.subtitle)}</span>
+        </button>
+      `;
+    })
+    .join('');
+
+  return `
+    <section class="panel analytics-nav${isCollapsed ? ' analytics-nav--collapsed' : ''}" id="analytics-nav">
+      <div class="analytics-nav__bar">
+        <div class="analytics-nav__status">
+          <span>Chart dock</span>
+          <strong id="analytics-nav-current">${escapeHtml(currentGroup.label)}</strong>
+          <small id="analytics-nav-current-chart">${escapeHtml(currentChart.navLabel)}</small>
+        </div>
+        <button
+          class="ghost-button analytics-nav__toggle"
+          id="analytics-nav-toggle"
+          type="button"
+          aria-expanded="${String(!isCollapsed)}"
+        >
+          ${isCollapsed ? 'Browse charts' : 'Close menu'}
+        </button>
+      </div>
+      <div class="analytics-nav__drawer" id="analytics-nav-drawer"${isCollapsed ? ' hidden' : ''}>
+        <div class="analytics-menu" id="analytics-menu">${buttons}</div>
+        <div class="analytics-submenu" id="analytics-submenu">${buildChartJumpButtons(activeGroup, activeChartKey)}</div>
+      </div>
+    </section>
+  `;
+}
+
+function buildChartPanel(session, definition, driverList, totalLaps) {
+  const hint = definition.key === 'speed' ? session.speedReferences?.method ?? definition.hint : definition.hint;
+  const toolbar =
+    definition.key === 'best-sectors'
+      ? `
+        <div class="chart-toolbar" id="best-sectors-controls">
+          <button class="ghost-button is-active" type="button" data-sector-button="sector1">Sector 1</button>
+          <button class="ghost-button" type="button" data-sector-button="sector2">Sector 2</button>
+          <button class="ghost-button" type="button" data-sector-button="sector3">Sector 3</button>
+        </div>
+      `
+      : definition.key === 'speed'
+        ? `
+        <div class="chart-toolbar" id="speed-controls">
+          <button class="ghost-button is-active" type="button" data-speed-button="top">Top speed</button>
+          <button class="ghost-button" type="button" data-speed-button="low">Low corner</button>
+          <button class="ghost-button" type="button" data-speed-button="medium">Medium corner</button>
+          <button class="ghost-button" type="button" data-speed-button="high">High corner</button>
+        </div>
+      `
+        : definition.key === 'lap-time'
+          ? `
+        <div class="chart-toolbar" id="lap-time-controls">
+          <button class="ghost-button is-active" type="button" data-lap-filter-button="all">All laps</button>
+          <button class="ghost-button" type="button" data-lap-filter-button="clean">Clean laps</button>
+        </div>
+      `
+      : '';
+  const body =
+    definition.kind === 'custom'
+      ? `<div class="tyre-board" id="${definition.customId}">${buildTyreStrategy(driverList, totalLaps)}</div>`
+      : `<div class="chart-frame"><canvas id="${definition.canvasId}"></canvas></div>`;
+
+  return `
+    <article
+      class="panel chart-panel expandable-panel"
+      data-chart-key="${definition.key}"
+      style="--panel-accent:${definition.accent}"
+    >
+      ${buildPanelHeader(session, definition.eyebrow, definition.title, hint, definition.transparencyKey)}
+      ${toolbar}
+      ${body}
+    </article>
+  `;
+}
+
+function buildChartSections(session, driverList) {
+  return chartGroups
+    .filter((group) => group.id !== 'all')
+    .map((group) => {
+      const charts = chartDefinitions.filter((chart) => chart.group === group.id);
+      return `
+        <section class="chart-section" data-chart-section="${group.id}">
+          <div class="chart-section__header">
+            <div>
+              <p class="eyebrow">${escapeHtml(group.label)}</p>
+              <h2>${escapeHtml(group.title)}</h2>
+            </div>
+            <p class="chart-section__hint">${escapeHtml(group.description)}</p>
+          </div>
+          <div class="chart-grid chart-grid--section">
+            ${charts
+              .map((chart) => buildChartPanel(session, chart, driverList, session.summary.totalLaps))
+              .join('')}
+          </div>
+        </section>
+      `;
+    })
+    .join('');
+}
+
 export async function renderSessionPage(container, sessionType, slug) {
   container.innerHTML = `
     <main class="shell">
@@ -238,6 +593,9 @@ export async function renderSessionPage(container, sessionType, slug) {
     const session = await getSessionDetails(sessionType, slug);
     const driverList = [...session.drivers].sort((left, right) => (left.result.position ?? 999) - (right.result.position ?? 999));
     const visibleDrivers = new Set(driverList.map((driver) => driver.driverNumber));
+    let activeGroup = 'race-story';
+    let activeChartKey = chartsForGroup(activeGroup)[0]?.key ?? null;
+    let isNavigatorCollapsed = true;
 
     container.innerHTML = `
       <main class="shell shell-race">
@@ -281,6 +639,8 @@ export async function renderSessionPage(container, sessionType, slug) {
           </div>
         </section>
 
+        ${buildAnalyticsNavigator(activeGroup, activeChartKey, isNavigatorCollapsed)}
+
         <section class="panel">
           <div class="panel__header">
             <div>
@@ -299,10 +659,9 @@ export async function renderSessionPage(container, sessionType, slug) {
             ${driverList
               .map(
                 (driver) => `
-                  <label class="driver-toggle">
+                  <label class="driver-toggle driver-toggle--code" title="${escapeHtml(driver.fullName)}">
                     <input type="checkbox" data-driver-toggle="${driver.driverNumber}" checked />
                     <span class="driver-chip" style="--driver-color:${driverColor(driver.teamColour)}">${driver.code}</span>
-                    <span>${escapeHtml(driver.fullName)}</span>
                   </label>
                 `,
               )
@@ -310,68 +669,7 @@ export async function renderSessionPage(container, sessionType, slug) {
           </div>
         </section>
 
-        <section class="chart-grid">
-          <article class="panel chart-panel expandable-panel">
-            ${buildPanelHeader(session, 'Chart 1', 'Driver positions by lap', 'Visible drivers are rebuilt into the chart state instead of being hidden with struck-through labels.', 'start-gain-loss')}
-            <div class="chart-frame"><canvas id="positions-chart"></canvas></div>
-          </article>
-          <article class="panel chart-panel expandable-panel">
-            ${buildPanelHeader(session, 'Chart 2', 'Gap to the leader', 'Gap traces inherit the same global driver filter and fullscreen interactions.', 'start-gain-loss')}
-            <div class="chart-frame"><canvas id="gap-chart"></canvas></div>
-          </article>
-          <article class="panel chart-panel expandable-panel">
-            ${buildPanelHeader(session, 'Chart 3', 'Top speed and representative corner speeds', session.speedReferences?.method ?? 'Representative corner references were unavailable for this session.', 'corner-speed-references')}
-            <div class="chart-frame"><canvas id="speed-chart"></canvas></div>
-          </article>
-          <article class="panel expandable-panel">
-            ${buildPanelHeader(session, 'Chart 4', 'Tyre usage and stint strategy', 'The compound letter and lap count are embedded in each visible stint block.', 'used-compounds')}
-            <div class="tyre-board" id="tyre-board">${buildTyreStrategy(driverList, session.summary.totalLaps)}</div>
-          </article>
-          <article class="panel chart-panel expandable-panel">
-            ${buildPanelHeader(session, 'Chart 5', 'Tyre stint distribution by compound', 'Box-and-whisker view of stint lengths for compounds used by the current selection.', 'used-compounds')}
-            <div class="chart-frame"><canvas id="tyre-box-chart"></canvas></div>
-          </article>
-          <article class="panel chart-panel expandable-panel">
-            ${buildPanelHeader(session, 'Chart 6', 'Pit stop duration', 'Direct OpenF1 pit-lane duration. Stationary stop duration is available in tooltips when the source provides it.', 'pit-stop-duration')}
-            <div class="chart-frame"><canvas id="pit-duration-chart"></canvas></div>
-          </article>
-          <article class="panel chart-panel expandable-panel">
-            ${buildPanelHeader(session, 'Chart 7', 'Pit stop time loss', 'Estimated from pit lap plus out lap versus nearby green-flag baseline laps.', 'pit-stop-time-loss')}
-            <div class="chart-frame"><canvas id="pit-loss-chart"></canvas></div>
-          </article>
-          <article class="panel chart-panel expandable-panel">
-            ${buildPanelHeader(session, 'Chart 8', 'Lap time evolution', 'Neutralization periods are shaded to frame pace changes under green, VSC and Safety Car conditions.', 'pit-stop-time-loss')}
-            <div class="chart-frame"><canvas id="lap-time-chart"></canvas></div>
-          </article>
-          <article class="panel chart-panel expandable-panel">
-            ${buildPanelHeader(session, 'Chart 9', 'Average pace per stint', 'Average representative lap time per stint, comparing drivers and compounds.', 'pit-stop-time-loss')}
-            <div class="chart-frame"><canvas id="stint-pace-chart"></canvas></div>
-          </article>
-          <article class="panel chart-panel expandable-panel">
-            ${buildPanelHeader(session, 'Chart 10', 'Tyre degradation', 'Compound curves aggregate representative green laps by tyre age for the visible drivers.', 'corner-speed-references')}
-            <div class="chart-frame"><canvas id="degradation-chart"></canvas></div>
-          </article>
-          <article class="panel chart-panel expandable-panel">
-            ${buildPanelHeader(session, 'Chart 11', 'Gain / loss at the start', 'Starting order is inferred from the earliest recorded position sample and compared with lap 1 order.', 'start-gain-loss')}
-            <div class="chart-frame"><canvas id="start-gain-chart"></canvas></div>
-          </article>
-          <article class="panel chart-panel expandable-panel">
-            ${buildPanelHeader(session, 'Chart 12', 'Driver consistency', 'Standard deviation is measured on representative green laps only.', 'corner-speed-references')}
-            <div class="chart-frame"><canvas id="consistency-chart"></canvas></div>
-          </article>
-          <article class="panel chart-panel expandable-panel">
-            ${buildPanelHeader(session, 'Chart 13', 'Best sectors', 'Best sector times are taken from lap records and remain filter-aware.', 'track-temperature')}
-            <div class="chart-frame"><canvas id="best-sectors-chart"></canvas></div>
-          </article>
-          <article class="panel chart-panel expandable-panel">
-            ${buildPanelHeader(session, 'Chart 14', 'Weather over the session', 'Track temperature, air temperature, wind and rainfall share the same timeline.', 'track-temperature')}
-            <div class="chart-frame"><canvas id="weather-chart"></canvas></div>
-          </article>
-          <article class="panel chart-panel expandable-panel">
-            ${buildPanelHeader(session, 'Chart 15', 'Safety Car / VSC impact', 'Average lap time by phase plus pit-stop count across the visible drivers.', 'pit-stop-time-loss')}
-            <div class="chart-frame"><canvas id="neutralization-chart"></canvas></div>
-          </article>
-        </section>
+        ${buildChartSections(session, driverList)}
 
         <section class="panel">
           <div class="panel__header">
@@ -454,32 +752,101 @@ export async function renderSessionPage(container, sessionType, slug) {
       </main>
     `;
 
-    const controllers = [
-      mountPositionChart(container.querySelector('#positions-chart'), session),
-      mountGapChart(container.querySelector('#gap-chart'), session),
-      mountSpeedChart(container.querySelector('#speed-chart'), session),
-      mountTyreBoxPlotChart(container.querySelector('#tyre-box-chart'), session),
-      mountPitDurationChart(container.querySelector('#pit-duration-chart'), session),
-      mountPitLossChart(container.querySelector('#pit-loss-chart'), session),
-      mountLapTimeEvolutionChart(container.querySelector('#lap-time-chart'), session),
-      mountStintPaceChart(container.querySelector('#stint-pace-chart'), session),
-      mountTyreDegradationChart(container.querySelector('#degradation-chart'), session),
-      mountStartGainChart(container.querySelector('#start-gain-chart'), session),
-      mountConsistencyChart(container.querySelector('#consistency-chart'), session),
-      mountBestSectorsChart(container.querySelector('#best-sectors-chart'), session),
-      mountWeatherChart(container.querySelector('#weather-chart'), session),
-      mountNeutralizationImpactChart(container.querySelector('#neutralization-chart'), session),
-    ];
+    const controllersByKey = new Map(
+      chartDefinitions
+        .filter((chart) => chart.mount)
+        .map((chart) => [chart.key, chart.mount(container.querySelector(`#${chart.canvasId}`), session)]),
+    );
+    const controllers = [...controllersByKey.values()];
 
     const tyreBoard = container.querySelector('#tyre-board');
     const teammateComparison = container.querySelector('#teammate-comparison');
     const mainToggleRoot = container.querySelector('#driver-filter');
     const mainFilterPanel = mainToggleRoot.parentElement;
+    const analyticsNav = container.querySelector('#analytics-nav');
+    const analyticsDrawer = container.querySelector('#analytics-nav-drawer');
+    const analyticsMenu = container.querySelector('#analytics-menu');
+    const analyticsSubmenu = container.querySelector('#analytics-submenu');
+    const analyticsCurrent = container.querySelector('#analytics-nav-current');
+    const analyticsCurrentChart = container.querySelector('#analytics-nav-current-chart');
+    const analyticsToggle = container.querySelector('#analytics-nav-toggle');
+    const speedControls = container.querySelector('#speed-controls');
+    const lapTimeControls = container.querySelector('#lap-time-controls');
+    const bestSectorsControls = container.querySelector('#best-sectors-controls');
+    const chartSections = [...container.querySelectorAll('[data-chart-section]')];
     const modal = container.querySelector('#chart-modal');
     const modalBody = container.querySelector('#chart-modal-body');
     const modalFilters = container.querySelector('#chart-modal-filters');
     let modalPlaceholder = null;
     let activePanel = null;
+
+    function spotlightPanel(panel) {
+      if (!panel) {
+        return;
+      }
+
+      panel.classList.remove('chart-panel--spotlight');
+      panel.offsetWidth;
+      panel.classList.add('chart-panel--spotlight');
+      window.setTimeout(() => panel.classList.remove('chart-panel--spotlight'), 1400);
+    }
+
+    function syncAnalyticsNavigation() {
+      const currentGroup = chartGroups.find((group) => group.id === activeGroup) ?? chartGroups[1];
+      const currentChart = chartDefinitions.find((chart) => chart.key === activeChartKey) ?? chartDefinitions[0];
+
+      for (const button of analyticsMenu.querySelectorAll('[data-chart-group-button]')) {
+        const isActive = button.dataset.chartGroupButton === activeGroup;
+        button.classList.toggle('is-active', isActive);
+        button.setAttribute('aria-pressed', String(isActive));
+      }
+
+      analyticsSubmenu.innerHTML = buildChartJumpButtons(activeGroup, activeChartKey);
+      analyticsNav.classList.toggle('analytics-nav--collapsed', isNavigatorCollapsed);
+      analyticsDrawer.hidden = isNavigatorCollapsed;
+      analyticsToggle.textContent = isNavigatorCollapsed ? 'Browse charts' : 'Close menu';
+      analyticsToggle.setAttribute('aria-expanded', String(!isNavigatorCollapsed));
+      analyticsCurrent.textContent = currentGroup.label;
+      analyticsCurrentChart.textContent = currentChart.navLabel;
+
+      for (const section of chartSections) {
+        section.hidden = activeGroup !== 'all' && section.dataset.chartSection !== activeGroup;
+      }
+    }
+
+    function setActiveGroup(groupId, shouldScroll = true) {
+      activeGroup = groupId;
+      const visibleCharts = chartsForGroup(activeGroup);
+
+      if (!visibleCharts.some((chart) => chart.key === activeChartKey)) {
+        activeChartKey = visibleCharts[0]?.key ?? null;
+      }
+
+      syncAnalyticsNavigation();
+
+      if (!shouldScroll) {
+        return;
+      }
+
+      const target =
+        activeGroup === 'all'
+          ? container.querySelector('[data-chart-section]')
+          : container.querySelector(`[data-chart-section="${activeGroup}"]`);
+
+      target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function focusChart(chartKey) {
+      activeChartKey = chartKey;
+      isNavigatorCollapsed = true;
+      syncAnalyticsNavigation();
+      const panel = container.querySelector(`[data-chart-key="${chartKey}"]`);
+
+      if (panel) {
+        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        spotlightPanel(panel);
+      }
+    }
 
     function applyVisibility() {
       const currentDrivers = driverList.filter((driver) => visibleDrivers.has(driver.driverNumber));
@@ -578,6 +945,73 @@ export async function renderSessionPage(container, sessionType, slug) {
       resizeControllers(controllers);
     }
 
+    analyticsToggle.addEventListener('click', () => {
+      isNavigatorCollapsed = !isNavigatorCollapsed;
+      syncAnalyticsNavigation();
+    });
+
+    analyticsMenu.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-chart-group-button]');
+
+      if (!button) {
+        return;
+      }
+
+      setActiveGroup(button.dataset.chartGroupButton);
+    });
+
+    analyticsSubmenu.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-chart-jump]');
+
+      if (!button) {
+        return;
+      }
+
+      focusChart(button.dataset.chartJump);
+    });
+
+    bestSectorsControls?.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-sector-button]');
+
+      if (!button) {
+        return;
+      }
+
+      for (const control of bestSectorsControls.querySelectorAll('[data-sector-button]')) {
+        control.classList.toggle('is-active', control === button);
+      }
+
+      controllersByKey.get('best-sectors')?.setSector(button.dataset.sectorButton);
+    });
+
+    speedControls?.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-speed-button]');
+
+      if (!button) {
+        return;
+      }
+
+      for (const control of speedControls.querySelectorAll('[data-speed-button]')) {
+        control.classList.toggle('is-active', control === button);
+      }
+
+      controllersByKey.get('speed')?.setMetric(button.dataset.speedButton);
+    });
+
+    lapTimeControls?.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-lap-filter-button]');
+
+      if (!button) {
+        return;
+      }
+
+      for (const control of lapTimeControls.querySelectorAll('[data-lap-filter-button]')) {
+        control.classList.toggle('is-active', control === button);
+      }
+
+      controllersByKey.get('lap-time')?.setFilterMode(button.dataset.lapFilterButton);
+    });
+
     bindFilterContainer(mainFilterPanel);
     bindFilterContainer(modalFilters);
 
@@ -595,6 +1029,7 @@ export async function renderSessionPage(container, sessionType, slug) {
       closer.addEventListener('click', closeModal);
     }
 
+    setActiveGroup(activeGroup, false);
     applyVisibility();
   } catch (error) {
     container.innerHTML = `

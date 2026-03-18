@@ -26,6 +26,21 @@ Chart.register(
   Filler,
 );
 
+const chartTokens = {
+  text: '#f7f2ea',
+  muted: '#c8c0b4',
+  grid: 'rgba(236, 225, 205, 0.07)',
+  coral: '#ff7a59',
+  coralSoft: 'rgba(255, 122, 89, 0.16)',
+  amber: '#f7d65b',
+  sky: '#6fd3ff',
+  aqua: '#9ddcff',
+  mint: '#66d6a5',
+  slate: '#94a3b8',
+  ivory: '#f8fafc',
+  rose: '#ff667a',
+};
+
 const neutralizationOverlayPlugin = {
   id: 'neutralizationOverlay',
   beforeDatasetsDraw(chart, _args, pluginOptions) {
@@ -48,7 +63,7 @@ const neutralizationOverlayPlugin = {
         continue;
       }
 
-      ctx.fillStyle = period.type === 'SC' ? 'rgba(255, 194, 77, 0.14)' : 'rgba(111, 211, 255, 0.12)';
+      ctx.fillStyle = period.type === 'SC' ? 'rgba(247, 214, 91, 0.16)' : 'rgba(111, 211, 255, 0.14)';
       ctx.fillRect(start - 8, yScale.top, end - start + 16, yScale.bottom - yScale.top);
     }
 
@@ -89,7 +104,7 @@ const boxWhiskerPlugin = {
       const yStdLow = yScale.getPixelForValue(stat.mean - stat.standardDeviation);
       const yStdHigh = yScale.getPixelForValue(stat.mean + stat.standardDeviation);
 
-      ctx.strokeStyle = '#efe9df';
+      ctx.strokeStyle = chartTokens.text;
       ctx.lineWidth = 1.5;
 
       ctx.beginPath();
@@ -104,13 +119,13 @@ const boxWhiskerPlugin = {
       ctx.lineTo(centerX + width / 3, yMax);
       ctx.stroke();
 
-      ctx.fillStyle = 'rgba(255, 108, 71, 0.28)';
+      ctx.fillStyle = chartTokens.coralSoft;
       ctx.fillRect(centerX - width / 2, yQ3, width, yQ1 - yQ3);
 
       ctx.strokeStyle = 'rgba(255, 208, 194, 0.95)';
       ctx.strokeRect(centerX - width / 2, yQ3, width, yQ1 - yQ3);
 
-      ctx.strokeStyle = '#f7f2ea';
+      ctx.strokeStyle = chartTokens.text;
       ctx.beginPath();
       ctx.moveTo(centerX - width / 2, yMedian);
       ctx.lineTo(centerX + width / 2, yMedian);
@@ -126,17 +141,71 @@ const boxWhiskerPlugin = {
       ctx.stroke();
       ctx.setLineDash([]);
 
-      ctx.fillStyle = '#7df0cf';
+      ctx.fillStyle = chartTokens.mint;
       ctx.beginPath();
       ctx.arc(centerX, yMean, 4, 0, Math.PI * 2);
       ctx.fill();
+
+      (stat.samples ?? []).forEach((sample, sampleIndex) => {
+        const offset = ((sampleIndex % 7) - 3) * 3;
+        const ySample = yScale.getPixelForValue(sample.value);
+
+        ctx.globalAlpha = sample.isOutlier ? 0.95 : 0.52;
+        ctx.fillStyle = sample.color;
+        ctx.beginPath();
+        ctx.arc(centerX + offset, ySample, sample.isOutlier ? 3.2 : 2.4, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      ctx.globalAlpha = 1;
     });
 
     ctx.restore();
   },
 };
 
-Chart.register(neutralizationOverlayPlugin, boxWhiskerPlugin);
+const lineEndLabelsPlugin = {
+  id: 'lineEndLabels',
+  afterDatasetsDraw(chart, _args, pluginOptions) {
+    if (!pluginOptions?.enabled) {
+      return;
+    }
+
+    const { ctx, chartArea } = chart;
+    ctx.save();
+    ctx.font = "11px 'Space Grotesk', sans-serif";
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+
+    chart.data.datasets.forEach((dataset, datasetIndex) => {
+      const meta = chart.getDatasetMeta(datasetIndex);
+      const points = meta?.data ?? [];
+      let lastPoint = null;
+
+      for (let index = points.length - 1; index >= 0; index -= 1) {
+        const value = dataset.data[index];
+
+        if (value === null || value === undefined || !Number.isFinite(value)) {
+          continue;
+        }
+
+        lastPoint = points[index];
+        break;
+      }
+
+      if (!lastPoint) {
+        return;
+      }
+
+      ctx.fillStyle = dataset.borderColor || chartTokens.text;
+      ctx.fillText(String(dataset.endLabel ?? dataset.label ?? ''), Math.min(lastPoint.x + 8, chartArea.right - 18), lastPoint.y);
+    });
+
+    ctx.restore();
+  },
+};
+
+Chart.register(neutralizationOverlayPlugin, boxWhiskerPlugin, lineEndLabelsPlugin);
 
 function average(values) {
   if (!values.length) {
@@ -146,9 +215,81 @@ function average(values) {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
+function standardDeviation(values) {
+  if (values.length < 2) {
+    return 0;
+  }
+
+  const mean = average(values);
+  const variance = values.reduce((sum, value) => sum + (value - mean) * (value - mean), 0) / values.length;
+  return Math.sqrt(variance);
+}
+
+function median(values) {
+  if (!values.length) {
+    return null;
+  }
+
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+
+  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+}
+
+function filteredGreenLapTimes(driver) {
+  const candidateLapTimes = (driver.lapDetails ?? [])
+    .filter(
+      (lap) =>
+        lap.isRepresentative &&
+        lap.lapStatus === 'GREEN' &&
+        !lap.isPitLap &&
+        !lap.isPitOutLap &&
+        Number.isFinite(lap.lapTime),
+    )
+    .map((lap) => lap.lapTime);
+
+  if (candidateLapTimes.length < 3) {
+    return candidateLapTimes;
+  }
+
+  const medianValue = median(candidateLapTimes);
+  const absoluteDeviations = candidateLapTimes.map((lapTime) => Math.abs(lapTime - medianValue));
+  const mad = median(absoluteDeviations) || 0;
+  const threshold = Math.max(mad * 3.5, 1.25);
+
+  return candidateLapTimes.filter((lapTime) => Math.abs(lapTime - medianValue) <= threshold);
+}
+
+function buildCleanLapSelection(driver) {
+  const candidateLaps = (driver.lapDetails ?? []).filter(
+    (lap) =>
+      lap.isRepresentative &&
+      lap.lapStatus === 'GREEN' &&
+      !lap.isPitLap &&
+      !lap.isPitOutLap &&
+      Number.isFinite(lap.lapTime),
+  );
+
+  if (candidateLaps.length < 3) {
+    return new Set(candidateLaps.map((lap) => lap.lapNumber));
+  }
+
+  const lapTimes = candidateLaps.map((lap) => lap.lapTime);
+  const medianValue = median(lapTimes);
+  const absoluteDeviations = lapTimes.map((lapTime) => Math.abs(lapTime - medianValue));
+  const mad = median(absoluteDeviations) || 0;
+  const threshold = Math.max(mad * 3.5, 1.25);
+
+  return new Set(
+    candidateLaps
+      .filter((lap) => Math.abs(lap.lapTime - medianValue) <= threshold)
+      .map((lap) => lap.lapNumber),
+  );
+}
+
 const defaultLegend = {
   labels: {
-    color: '#efe9df',
+    color: chartTokens.text,
     boxWidth: 10,
     boxHeight: 10,
     usePointStyle: true,
@@ -162,7 +303,7 @@ const defaultLegend = {
 
 const defaultTooltip = {
   backgroundColor: 'rgba(8, 12, 23, 0.94)',
-  titleColor: '#f8f4ec',
+  titleColor: chartTokens.text,
   bodyColor: '#ddd4c2',
   borderColor: 'rgba(239, 233, 223, 0.12)',
   borderWidth: 1,
@@ -173,25 +314,47 @@ const defaultTooltip = {
 function compoundColor(compound) {
   switch (compound) {
     case 'SOFT':
-      return '#f04452';
+      return '#ff667a';
     case 'MEDIUM':
-      return '#f7d65b';
+      return chartTokens.amber;
     case 'HARD':
-      return '#f1f4f9';
+      return '#e6edf7';
     case 'INTERMEDIATE':
-      return '#37c36b';
+      return '#53ca90';
     case 'WET':
-      return '#2f9cff';
+      return '#4eb8ff';
     default:
       return '#9ca3af';
   }
 }
 
-function buildTicks(unit) {
+function formatTickValue(value, unit, kind = 'time') {
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    return `${value}${unit}`;
+  }
+
+  if (kind === 'speed') {
+    return `${numericValue.toFixed(Math.abs(numericValue) >= 100 ? 0 : 1)}${unit}`;
+  }
+
+  if (kind === 'count') {
+    return `${numericValue.toFixed(Number.isInteger(numericValue) || Math.abs(numericValue) >= 10 ? 0 : 1)}${unit}`;
+  }
+
+  if (kind === 'temperature') {
+    return `${numericValue.toFixed(1)}${unit}`;
+  }
+
+  return `${numericValue.toFixed(Math.abs(numericValue) >= 10 ? 2 : 3)}${unit}`;
+}
+
+function buildTicks(unit, kind = 'time') {
   return {
-    color: '#c6c0b5',
+    color: chartTokens.muted,
     callback(value) {
-      return `${value}${unit}`;
+      return formatTickValue(value, unit, kind);
     },
   };
 }
@@ -200,32 +363,33 @@ function baseScales() {
   return {
     x: {
       ticks: {
-        color: '#c6c0b5',
+        color: chartTokens.muted,
         maxTicksLimit: 10,
       },
       grid: {
-        color: 'rgba(236, 225, 205, 0.07)',
+        color: chartTokens.grid,
       },
     },
     y: {
       ticks: {
-        color: '#c6c0b5',
+        color: chartTokens.muted,
       },
       grid: {
-        color: 'rgba(236, 225, 205, 0.07)',
+        color: chartTokens.grid,
       },
     },
   };
 }
 
-function buildLineDataset(driver, series, valueKey, labelSuffix = driver.teamName) {
+function buildLineDataset(driver, series, valueKey, labelSuffix = '') {
   const color = driverColor(driver.teamColour);
+  const label = labelSuffix ? `${driver.code} | ${labelSuffix}` : driver.code;
 
   return {
-    label: `${driver.code} | ${labelSuffix}`,
+    label,
     data: series.map((point) => point[valueKey]),
     borderColor: color,
-    backgroundColor: `${color}22`,
+    backgroundColor: `${color}1c`,
     pointRadius: 0,
     pointHoverRadius: 4,
     borderWidth: 2,
@@ -278,12 +442,20 @@ export function mountPositionChart(canvas, session) {
     },
     options: {
       maintainAspectRatio: false,
+      layout: {
+        padding: {
+          right: 54,
+        },
+      },
       interaction: {
         mode: 'nearest',
         intersect: false,
       },
       plugins: {
         legend: defaultLegend,
+        lineEndLabels: {
+          enabled: true,
+        },
         tooltip: {
           ...defaultTooltip,
           callbacks: {
@@ -321,7 +493,10 @@ export function mountPositionChart(canvas, session) {
       setChartData(
         chart,
         session.lapAxis,
-        drivers.map((driver) => buildLineDataset(driver, driver.positionsByLap, 'position')),
+        drivers.map((driver) => ({
+          ...buildLineDataset(driver, driver.positionsByLap, 'position'),
+          endLabel: driver.fullName?.split?.(' ')?.slice?.(-1)?.[0] ?? driver.code,
+        })),
       );
     },
   };
@@ -357,6 +532,19 @@ export function mountGapChart(canvas, session) {
       },
       scales: {
         ...baseScales(),
+        x: {
+          ticks: {
+            color: chartTokens.muted,
+            autoSkip: false,
+            maxRotation: 0,
+            font: {
+              size: 10,
+            },
+          },
+          grid: {
+            display: false,
+          },
+        },
         y: {
           ticks: buildTicks('s'),
           grid: {
@@ -381,6 +569,8 @@ export function mountGapChart(canvas, session) {
 }
 
 export function mountSpeedChart(canvas, session) {
+  let activeMetric = 'top';
+  let currentVisibleNumbers = new Set(session.drivers.map((driver) => driver.driverNumber));
   const chart = new Chart(canvas, {
     type: 'bar',
     data: {
@@ -390,7 +580,9 @@ export function mountSpeedChart(canvas, session) {
     options: {
       maintainAspectRatio: false,
       plugins: {
-        legend: defaultLegend,
+        legend: {
+          display: false,
+        },
         tooltip: {
           ...defaultTooltip,
           callbacks: {
@@ -402,10 +594,20 @@ export function mountSpeedChart(canvas, session) {
       },
       scales: {
         ...baseScales(),
-        y: {
-          ticks: buildTicks(' km/h'),
+        x: {
+          ticks: {
+            color: chartTokens.muted,
+            autoSkip: false,
+            maxRotation: 0,
+          },
           grid: {
-            color: 'rgba(236, 225, 205, 0.07)',
+            display: false,
+          },
+        },
+        y: {
+          ticks: buildTicks(' km/h', 'speed'),
+          grid: {
+            color: chartTokens.grid,
           },
         },
       },
@@ -414,44 +616,31 @@ export function mountSpeedChart(canvas, session) {
 
   return {
     chart,
+    setMetric(metric) {
+      activeMetric = metric;
+      this.sync(currentVisibleNumbers);
+    },
     sync(visibleNumbers) {
+      currentVisibleNumbers = new Set(visibleNumbers);
       const drivers = visibleDrivers(session.drivers, visibleNumbers);
-      const allSpeeds = drivers.flatMap((driver) => [
-        driver.topSpeed,
-        driver.cornerSpeeds?.low,
-        driver.cornerSpeeds?.medium,
-        driver.cornerSpeeds?.high,
-      ]);
-      const range = computeRange(allSpeeds, 0.12);
+      const metricConfig =
+        activeMetric === 'top'
+          ? { label: 'Top speed', key: (driver) => driver.topSpeed }
+          : activeMetric === 'low'
+            ? { label: 'Low-speed corner', key: (driver) => driver.cornerSpeeds?.low ?? null }
+            : activeMetric === 'medium'
+              ? { label: 'Medium-speed corner', key: (driver) => driver.cornerSpeeds?.medium ?? null }
+              : { label: 'High-speed corner', key: (driver) => driver.cornerSpeeds?.high ?? null };
+      const values = drivers.map((driver) => metricConfig.key(driver));
+      const range = computeRange(values, activeMetric === 'top' ? 0.08 : 0.12);
 
       chart.options.scales.y.min = range.min;
       chart.options.scales.y.max = range.max;
       setChartData(chart, drivers.map((driver) => driver.code), [
         {
-          label: 'Top speed',
-          data: drivers.map((driver) => driver.topSpeed),
+          label: metricConfig.label,
+          data: values,
           backgroundColor: drivers.map((driver) => driverColor(driver.teamColour)),
-          borderRadius: 10,
-          borderSkipped: false,
-        },
-        {
-          label: 'Low-speed corner',
-          data: drivers.map((driver) => driver.cornerSpeeds?.low ?? null),
-          backgroundColor: '#38bdf8',
-          borderRadius: 10,
-          borderSkipped: false,
-        },
-        {
-          label: 'Medium-speed corner',
-          data: drivers.map((driver) => driver.cornerSpeeds?.medium ?? null),
-          backgroundColor: '#f59e0b',
-          borderRadius: 10,
-          borderSkipped: false,
-        },
-        {
-          label: 'High-speed corner',
-          data: drivers.map((driver) => driver.cornerSpeeds?.high ?? null),
-          backgroundColor: '#7dd3fc',
           borderRadius: 10,
           borderSkipped: false,
         },
@@ -466,16 +655,21 @@ function buildCompoundStatsFromDrivers(drivers) {
   for (const driver of drivers) {
     for (const stint of driver.stints ?? []) {
       const bucket = statsByCompound.get(stint.compound) ?? [];
-      bucket.push(stint.length);
+      bucket.push({
+        value: stint.length,
+        color: driverColor(driver.teamColour),
+      });
       statsByCompound.set(stint.compound, bucket);
     }
   }
 
-  return [...statsByCompound.entries()].map(([compound, lengths]) => {
+  return [...statsByCompound.entries()].map(([compound, samples]) => {
+    const lengths = samples.map((sample) => sample.value);
     const sorted = [...lengths].sort((left, right) => left - right);
     const mean = sorted.reduce((sum, value) => sum + value, 0) / sorted.length;
     const variance =
       sorted.reduce((sum, value) => sum + (value - mean) * (value - mean), 0) / sorted.length;
+    const standardDeviation = Math.sqrt(variance);
     const interpolate = (ratio) => {
       if (sorted.length === 1) {
         return sorted[0];
@@ -501,7 +695,11 @@ function buildCompoundStatsFromDrivers(drivers) {
       q3: interpolate(0.75),
       max: sorted[sorted.length - 1],
       mean,
-      standardDeviation: Math.sqrt(variance),
+      standardDeviation,
+      samples: samples.map((sample) => ({
+        ...sample,
+        isOutlier: Math.abs(sample.value - mean) > standardDeviation,
+      })),
     };
   });
 }
@@ -551,7 +749,7 @@ export function mountTyreBoxPlotChart(canvas, session) {
           ticks: {
             color: '#c6c0b5',
             callback(value) {
-              return `${value} laps`;
+              return formatTickValue(value, ' laps', 'count');
             },
           },
           grid: {
@@ -599,6 +797,16 @@ function mountStopsChart(canvas, session, metricKey, chartLabel, valueFormatter)
       },
       scales: {
         ...baseScales(),
+        x: {
+          ticks: {
+            color: chartTokens.muted,
+            autoSkip: false,
+            maxRotation: 0,
+          },
+          grid: {
+            display: false,
+          },
+        },
         y: {
           ticks: buildTicks('s'),
           grid: {
@@ -617,7 +825,7 @@ function mountStopsChart(canvas, session, metricKey, chartLabel, valueFormatter)
         (driver.pitStops ?? [])
           .filter((pitStop) => Number.isFinite(pitStop[metricKey]))
           .map((pitStop) => ({
-            label: `${driver.code} L${pitStop.lapNumber}`,
+            label: [driver.code, `L${pitStop.lapNumber}`],
             value: pitStop[metricKey],
             color: driverColor(driver.teamColour),
           })),
@@ -651,7 +859,7 @@ function mountStopsChart(canvas, session, metricKey, chartLabel, valueFormatter)
           type: 'line',
           label: 'Average',
           data: stops.map(() => averageValue),
-          borderColor: '#f8fafc',
+          borderColor: chartTokens.ivory,
           borderWidth: 2,
           pointRadius: 0,
         },
@@ -659,7 +867,7 @@ function mountStopsChart(canvas, session, metricKey, chartLabel, valueFormatter)
           type: 'line',
           label: '+1 std dev',
           data: stops.map(() => (Number.isFinite(averageValue) ? averageValue + stdDev : null)),
-          borderColor: '#7dd3fc',
+          borderColor: chartTokens.aqua,
           borderDash: [6, 6],
           borderWidth: 1.5,
           pointRadius: 0,
@@ -668,7 +876,7 @@ function mountStopsChart(canvas, session, metricKey, chartLabel, valueFormatter)
           type: 'line',
           label: '-1 std dev',
           data: stops.map(() => (Number.isFinite(averageValue) ? averageValue - stdDev : null)),
-          borderColor: '#7dd3fc',
+          borderColor: chartTokens.aqua,
           borderDash: [6, 6],
           borderWidth: 1.5,
           pointRadius: 0,
@@ -693,6 +901,8 @@ export function mountPitLossChart(canvas, session) {
 }
 
 export function mountLapTimeEvolutionChart(canvas, session) {
+  let filterMode = 'all';
+  let currentVisibleNumbers = new Set(session.drivers.map((driver) => driver.driverNumber));
   const chart = new Chart(canvas, {
     type: 'line',
     data: {
@@ -721,6 +931,16 @@ export function mountLapTimeEvolutionChart(canvas, session) {
       },
       scales: {
         ...baseScales(),
+        x: {
+          ticks: {
+            color: chartTokens.muted,
+            autoSkip: false,
+            maxRotation: 0,
+          },
+          grid: {
+            display: false,
+          },
+        },
         y: {
           ticks: buildTicks('s'),
           grid: {
@@ -735,21 +955,29 @@ export function mountLapTimeEvolutionChart(canvas, session) {
 
   return {
     chart,
+    setFilterMode(mode) {
+      filterMode = mode;
+      this.sync(currentVisibleNumbers);
+    },
     sync(visibleNumbers) {
+      currentVisibleNumbers = new Set(visibleNumbers);
       const drivers = visibleDrivers(session.drivers, visibleNumbers);
-      const datasets = drivers.map((driver) =>
-        buildLineDataset(
+      const datasets = drivers.map((driver) => {
+        const cleanLaps = filterMode === 'clean' ? buildCleanLapSelection(driver) : null;
+
+        return buildLineDataset(
           driver,
           session.lapAxis.map((lapNumber) => {
             const lap = driver.lapDetails.find((item) => item.lapNumber === lapNumber);
             return {
               lapNumber,
-              lapTime: lap?.lapTime ?? null,
+              lapTime:
+                !lap || (filterMode === 'clean' && !cleanLaps.has(lapNumber)) ? null : (lap?.lapTime ?? null),
             };
           }),
           'lapTime',
-        ),
-      );
+        );
+      });
       const range = computeRange(
         datasets.flatMap((dataset) => dataset.data).filter(Number.isFinite),
         0.08,
@@ -955,6 +1183,7 @@ export function mountStartGainChart(canvas, session) {
         x: {
           ticks: {
             color: '#c6c0b5',
+            stepSize: 1,
             callback(value) {
               return value > 0 ? `+${value}` : `${value}`;
             },
@@ -983,7 +1212,7 @@ export function mountStartGainChart(canvas, session) {
         .map((driver) => ({
           label: driver.code,
           value: driver.start.gainLoss,
-          color: driver.start.gainLoss >= 0 ? '#4fbf7f' : '#ef4444',
+          color: driverColor(driver.teamColour),
         }))
         .sort((left, right) => right.value - left.value);
       const absoluteMax = Math.max(...rows.map((row) => Math.abs(row.value)), 1);
@@ -1049,18 +1278,26 @@ export function mountConsistencyChart(canvas, session) {
   return {
     chart,
     sync(visibleNumbers) {
-      const drivers = visibleDrivers(session.drivers, visibleNumbers)
-        .filter((driver) => Number.isFinite(driver.consistency?.lapTimeStdDev))
-        .sort((left, right) => left.consistency.lapTimeStdDev - right.consistency.lapTimeStdDev);
-      const range = computeRange(drivers.map((driver) => driver.consistency.lapTimeStdDev), 0.15);
+      const rows = visibleDrivers(session.drivers, visibleNumbers)
+        .map((driver) => {
+          const lapTimes = filteredGreenLapTimes(driver);
+          return {
+            code: driver.code,
+            color: driverColor(driver.teamColour),
+            value: lapTimes.length > 1 ? standardDeviation(lapTimes) : null,
+          };
+        })
+        .filter((row) => Number.isFinite(row.value))
+        .sort((left, right) => left.value - right.value);
+      const range = computeRange(rows.map((row) => row.value), 0.15);
 
       chart.options.scales.x.min = Math.max(0, range.min);
       chart.options.scales.x.max = range.max;
-      setChartData(chart, drivers.map((driver) => driver.code), [
+      setChartData(chart, rows.map((row) => row.code), [
         {
           label: 'Green-flag lap-time std dev',
-          data: drivers.map((driver) => driver.consistency.lapTimeStdDev),
-          backgroundColor: drivers.map((driver) => driverColor(driver.teamColour)),
+          data: rows.map((row) => row.value),
+          backgroundColor: rows.map((row) => row.color),
           borderRadius: 10,
           borderSkipped: false,
         },
@@ -1070,6 +1307,8 @@ export function mountConsistencyChart(canvas, session) {
 }
 
 export function mountBestSectorsChart(canvas, session) {
+  let activeSector = 'sector1';
+  let currentVisibleNumbers = new Set(session.drivers.map((driver) => driver.driverNumber));
   const chart = new Chart(canvas, {
     type: 'bar',
     data: {
@@ -1103,38 +1342,24 @@ export function mountBestSectorsChart(canvas, session) {
 
   return {
     chart,
+    setSector(sectorKey) {
+      activeSector = sectorKey;
+      this.sync(currentVisibleNumbers);
+    },
     sync(visibleNumbers) {
+      currentVisibleNumbers = new Set(visibleNumbers);
       const drivers = visibleDrivers(session.drivers, visibleNumbers);
-      const range = computeRange(
-        drivers.flatMap((driver) => [
-          driver.bestSectors?.sector1,
-          driver.bestSectors?.sector2,
-          driver.bestSectors?.sector3,
-        ]),
-        0.08,
-      );
+      const sectorLabel =
+        activeSector === 'sector1' ? 'Sector 1' : activeSector === 'sector2' ? 'Sector 2' : 'Sector 3';
+      const range = computeRange(drivers.map((driver) => driver.bestSectors?.[activeSector]), 0.08);
 
       chart.options.scales.y.min = range.min;
       chart.options.scales.y.max = range.max;
       setChartData(chart, drivers.map((driver) => driver.code), [
         {
-          label: 'Sector 1',
-          data: drivers.map((driver) => driver.bestSectors?.sector1 ?? null),
-          backgroundColor: '#ff7a59',
-          borderRadius: 8,
-          borderSkipped: false,
-        },
-        {
-          label: 'Sector 2',
-          data: drivers.map((driver) => driver.bestSectors?.sector2 ?? null),
-          backgroundColor: '#fbbf24',
-          borderRadius: 8,
-          borderSkipped: false,
-        },
-        {
-          label: 'Sector 3',
-          data: drivers.map((driver) => driver.bestSectors?.sector3 ?? null),
-          backgroundColor: '#38bdf8',
+          label: sectorLabel,
+          data: drivers.map((driver) => driver.bestSectors?.[activeSector] ?? null),
+          backgroundColor: drivers.map((driver) => driverColor(driver.teamColour)),
           borderRadius: 8,
           borderSkipped: false,
         },
@@ -1154,7 +1379,7 @@ export function mountWeatherChart(canvas, session) {
         {
           label: 'Track temperature',
           data: timeline.map((entry) => entry.trackTemperature),
-          borderColor: '#ff7a59',
+          borderColor: chartTokens.coral,
           backgroundColor: 'rgba(255, 122, 89, 0.12)',
           borderWidth: 2,
           pointRadius: 0,
@@ -1164,7 +1389,7 @@ export function mountWeatherChart(canvas, session) {
         {
           label: 'Air temperature',
           data: timeline.map((entry) => entry.airTemperature),
-          borderColor: '#f8fafc',
+          borderColor: chartTokens.ivory,
           backgroundColor: 'rgba(248, 250, 252, 0.08)',
           borderWidth: 2,
           pointRadius: 0,
@@ -1174,7 +1399,7 @@ export function mountWeatherChart(canvas, session) {
         {
           label: 'Wind speed',
           data: timeline.map((entry) => entry.windSpeed),
-          borderColor: '#38bdf8',
+          borderColor: chartTokens.sky,
           backgroundColor: 'rgba(56, 189, 248, 0.08)',
           borderWidth: 2,
           pointRadius: 0,
@@ -1184,7 +1409,7 @@ export function mountWeatherChart(canvas, session) {
         {
           label: 'Rainfall',
           data: timeline.map((entry) => entry.rainfall),
-          borderColor: '#7dd3fc',
+          borderColor: chartTokens.aqua,
           backgroundColor: 'rgba(125, 211, 252, 0.08)',
           borderWidth: 2,
           pointRadius: 0,
@@ -1215,14 +1440,14 @@ export function mountWeatherChart(canvas, session) {
         },
         temp: {
           position: 'left',
-          ticks: buildTicks('C'),
+          ticks: buildTicks('C', 'temperature'),
           grid: {
             color: 'rgba(236, 225, 205, 0.07)',
           },
         },
         wind: {
           position: 'right',
-          ticks: buildTicks(' m/s'),
+          ticks: buildTicks(' m/s', 'speed'),
           grid: {
             drawOnChartArea: false,
           },
@@ -1310,7 +1535,7 @@ export function mountNeutralizationImpactChart(canvas, session) {
         {
           label: 'Average lap time',
           data: averages,
-          backgroundColor: ['#94a3b8', '#38bdf8', '#fbbf24'],
+          backgroundColor: [chartTokens.slate, chartTokens.sky, chartTokens.amber],
           borderRadius: 10,
           borderSkipped: false,
         },
@@ -1318,8 +1543,8 @@ export function mountNeutralizationImpactChart(canvas, session) {
           type: 'line',
           label: 'Pit stops',
           data: stopCounts,
-          borderColor: '#f8fafc',
-          backgroundColor: '#f8fafc',
+          borderColor: chartTokens.ivory,
+          backgroundColor: chartTokens.ivory,
           borderWidth: 2,
           pointRadius: 3,
           yAxisID: 'yCount',

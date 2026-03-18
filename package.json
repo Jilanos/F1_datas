@@ -6,8 +6,10 @@
   "scripts": {
     "build:data": "node scripts/build-data.mjs",
     "build:pages": "node scripts/build-pages.mjs",
-    "build": "npm.cmd run build:data && npm.cmd run build:pages && vite build",
-    "dev": "npm.cmd run build:data && npm.cmd run build:pages && vite --host",
+    "build": "npm run build:data && npm run build:pages && vite build",
+    "build:ui": "npm run build:pages && vite build",
+    "dev": "npm run build:data && npm run build:pages && vite --host",
+    "dev:ui": "npm run build:pages && vite --host",
     "preview": "vite preview --host"
   },
   "dependencies": {

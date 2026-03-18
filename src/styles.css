@@ -9,6 +9,9 @@
   --muted: #c1baad;
   --accent: #ff6c47;
   --accent-soft: #ffd0c2;
+  --accent-amber: #f7d65b;
+  --accent-sky: #6fd3ff;
+  --accent-mint: #66d6a5;
   --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
   --radius-xl: 30px;
   --radius-lg: 22px;
@@ -21,6 +24,7 @@
 
 html {
   min-height: 100%;
+  scroll-behavior: smooth;
   background:
     radial-gradient(circle at top left, rgba(255, 108, 71, 0.16), transparent 22%),
     radial-gradient(circle at 80% 10%, rgba(0, 204, 255, 0.14), transparent 22%),
@@ -223,8 +227,224 @@ h3 {
   padding: 22px;
 }
 
+.analytics-nav {
+  position: sticky;
+  top: 12px;
+  z-index: 18;
+  margin-top: 20px;
+  padding: 12px 14px;
+  background:
+    radial-gradient(circle at top right, rgba(111, 211, 255, 0.08), transparent 30%),
+    linear-gradient(180deg, rgba(10, 19, 31, 0.96), rgba(12, 20, 31, 0.84));
+}
+
+.analytics-nav__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.analytics-nav__status {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.analytics-nav__status span,
+.analytics-nav__status small {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.analytics-nav__status strong {
+  font-family: 'Sora', sans-serif;
+  font-size: 0.96rem;
+}
+
+.analytics-nav__drawer {
+  margin-top: 12px;
+}
+
+.analytics-nav__header,
+.chart-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.analytics-nav__copy {
+  max-width: 68ch;
+}
+
+.analytics-nav__tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.analytics-nav__current {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 200px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.analytics-nav__current span,
+.analytics-nav__current small {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.analytics-nav__current strong {
+  font-family: 'Sora', sans-serif;
+  font-size: 0.95rem;
+}
+
+.analytics-nav__toggle {
+  white-space: nowrap;
+}
+
+.analytics-menu,
+.analytics-submenu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.analytics-menu {
+  margin-top: 18px;
+}
+
+.analytics-submenu {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.analytics-menu__button,
+.analytics-submenu__button {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  gap: 4px;
+  padding: 11px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.analytics-menu__button strong,
+.analytics-submenu__button strong {
+  font-family: 'Sora', sans-serif;
+  font-size: 0.9rem;
+}
+
+.analytics-menu__button span,
+.analytics-submenu__button span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.analytics-menu__button:hover,
+.analytics-submenu__button:hover,
+.driver-toggle:hover,
+.ghost-button:hover,
+.panel-expand:hover {
+  transform: translateY(-1px);
+}
+
+.analytics-menu__button.is-active,
+.analytics-submenu__button.is-active {
+  border-color: var(--nav-accent);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.04));
+  box-shadow: inset 0 0 0 1px var(--nav-accent), 0 20px 44px rgba(0, 0, 0, 0.24);
+}
+
+.analytics-menu__button.is-active strong,
+.analytics-submenu__button.is-active strong {
+  color: #fff8ef;
+}
+
+.analytics-nav--collapsed {
+  padding-bottom: 12px;
+}
+
+.chart-section {
+  margin-top: 28px;
+}
+
+.chart-section__header {
+  margin-bottom: 16px;
+  padding: 0 4px;
+}
+
+.chart-section__hint {
+  max-width: 60ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.94rem;
+  line-height: 1.6;
+}
+
+.chart-grid--section {
+  margin-top: 0;
+}
+
+.chart-panel {
+  position: relative;
+  overflow: hidden;
+}
+
+.chart-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 22px;
+  right: 22px;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--panel-accent), rgba(255, 255, 255, 0));
+}
+
+.chart-panel--spotlight {
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.38), inset 0 0 0 1px var(--panel-accent);
+}
+
 .panel-loading {
   margin-top: 20px;
+}
+
+.chart-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -2px 0 14px;
+}
+
+.chart-toolbar .ghost-button {
+  padding: 8px 12px;
+}
+
+.chart-toolbar .ghost-button.is-active {
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
 }
 
 .panel__header {
@@ -348,10 +568,22 @@ h3 {
   border: 1px solid var(--line);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.03);
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
 }
 
 .driver-toggle input {
   accent-color: var(--accent);
+}
+
+.driver-toggle--code {
+  padding: 6px 8px;
+}
+
+.driver-toggle--code input {
+  display: none;
 }
 
 .driver-chip {
@@ -624,6 +856,10 @@ h3 {
     grid-template-columns: 1fr;
   }
 
+  .analytics-nav {
+    position: static;
+  }
+
   .tyre-row {
     grid-template-columns: 1fr;
   }
@@ -654,9 +890,35 @@ h3 {
   .panel__header,
   .race-card__footer,
   .hero-race__headline,
-  .chart-modal__top {
+  .chart-modal__top,
+  .analytics-nav__header,
+  .chart-section__header {
     flex-direction: column;
     align-items: start;
+  }
+
+  .analytics-nav__tools {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    margin-left: 0;
+  }
+
+  .analytics-nav__current {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .analytics-nav__bar,
+  .analytics-nav__status {
+    width: 100%;
+    flex-direction: column;
+    align-items: start;
+  }
+
+  .analytics-menu__button,
+  .analytics-submenu__button {
+    width: 100%;
   }
 
   .chart-frame {
