@@ -82,8 +82,8 @@ const chartDefinitions = [
     navLabel: 'Lap evolution',
     eyebrow: 'Race story',
     title: 'Lap time evolution',
-    hint: 'Neutralization periods are shaded to frame pace changes under green, VSC and Safety Car conditions.',
-    transparencyKey: 'pit-stop-time-loss',
+    hint: 'Raw lap times are plotted as recorded. Clean-lap mode only tightens the y-axis around representative green laps.',
+    transparencyKey: 'lap-times',
     accent: '#ff8a73',
     canvasId: 'lap-time-chart',
     mount: mountLapTimeEvolutionChart,
@@ -94,7 +94,7 @@ const chartDefinitions = [
     navLabel: 'Start delta',
     eyebrow: 'Race story',
     title: 'Gain / loss at the start',
-    hint: 'Starting order is inferred from the earliest recorded position sample and compared with lap 1 order.',
+    hint: 'Starting order is inferred from the earliest recorded position sample and compared with lap 1, or the first classified opening-phase position when lap 1 is missing.',
     transparencyKey: 'start-gain-loss',
     accent: '#ffb366',
     canvasId: 'start-gain-chart',
@@ -178,7 +178,7 @@ const chartDefinitions = [
     navLabel: 'Pit duration',
     eyebrow: 'Execution',
     title: 'Pit stop duration',
-    hint: 'Direct OpenF1 pit-lane duration. Stationary stop duration is available in tooltips when the source provides it.',
+    hint: 'Direct OpenF1 pit-lane duration: time spent crossing the full pit lane. Stationary stop duration is available in tooltips when the source provides it.',
     transparencyKey: 'pit-stop-duration',
     accent: '#f7d65b',
     canvasId: 'pit-duration-chart',
@@ -190,7 +190,7 @@ const chartDefinitions = [
     navLabel: 'Pit loss',
     eyebrow: 'Execution',
     title: 'Pit stop time loss',
-    hint: 'Estimated from pit lap plus out lap versus nearby green-flag baseline laps.',
+    hint: 'Estimated competitive loss versus staying on track, using pit lap plus out lap against nearby green-flag baseline laps.',
     transparencyKey: 'pit-stop-time-loss',
     accent: '#ffc16b',
     canvasId: 'pit-loss-chart',
@@ -289,13 +289,15 @@ function buildTyreStrategy(drivers, totalLaps) {
         .map((stint) => {
           const width = totalLaps ? (stint.length / totalLaps) * 100 : 0;
           const compound = stint.compound ?? 'UNKNOWN';
+          const displayCode = compound === 'UNKNOWN' ? '?' : compound.slice(0, 1);
+          const label = compound === 'UNKNOWN' ? 'Unknown compound' : compound;
           return `
             <span
               class="stint stint-${compound.toLowerCase()}"
               style="width:${width}%"
-              title="${driver.code}: ${compound} from lap ${stint.lapStart} to ${stint.lapEnd}"
+              title="${driver.code}: ${label} from lap ${stint.lapStart} to ${stint.lapEnd}"
             >
-              <span>${escapeHtml(compound.slice(0, 1))}</span>
+              <span>${escapeHtml(displayCode)}</span>
               <small>${stint.length} laps</small>
             </span>
           `;

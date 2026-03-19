@@ -119,10 +119,10 @@ const boxWhiskerPlugin = {
       ctx.lineTo(centerX + width / 3, yMax);
       ctx.stroke();
 
-      ctx.fillStyle = chartTokens.coralSoft;
+      ctx.fillStyle = withAlpha(stat.color ?? chartTokens.coral, 0.28);
       ctx.fillRect(centerX - width / 2, yQ3, width, yQ1 - yQ3);
 
-      ctx.strokeStyle = 'rgba(255, 208, 194, 0.95)';
+      ctx.strokeStyle = stat.color ?? 'rgba(255, 208, 194, 0.95)';
       ctx.strokeRect(centerX - width / 2, yQ3, width, yQ1 - yQ3);
 
       ctx.strokeStyle = chartTokens.text;
@@ -225,6 +225,20 @@ function standardDeviation(values) {
   return Math.sqrt(variance);
 }
 
+function withAlpha(hexColor, alpha) {
+  const normalized = String(hexColor).replace('#', '');
+
+  if (normalized.length !== 6) {
+    return hexColor;
+  }
+
+  const red = Number.parseInt(normalized.slice(0, 2), 16);
+  const green = Number.parseInt(normalized.slice(2, 4), 16);
+  const blue = Number.parseInt(normalized.slice(4, 6), 16);
+
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
 function median(values) {
   if (!values.length) {
     return null;
@@ -236,42 +250,11 @@ function median(values) {
   return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
 }
 
-function filteredGreenLapTimes(driver) {
-  const candidateLapTimes = (driver.lapDetails ?? [])
-    .filter(
-      (lap) =>
-        lap.isRepresentative &&
-        lap.lapStatus === 'GREEN' &&
-        !lap.isPitLap &&
-        !lap.isPitOutLap &&
-        Number.isFinite(lap.lapTime),
-    )
-    .map((lap) => lap.lapTime);
-
-  if (candidateLapTimes.length < 3) {
-    return candidateLapTimes;
-  }
-
-  const medianValue = median(candidateLapTimes);
-  const absoluteDeviations = candidateLapTimes.map((lapTime) => Math.abs(lapTime - medianValue));
-  const mad = median(absoluteDeviations) || 0;
-  const threshold = Math.max(mad * 3.5, 1.25);
-
-  return candidateLapTimes.filter((lapTime) => Math.abs(lapTime - medianValue) <= threshold);
-}
-
-function buildCleanLapSelection(driver) {
-  const candidateLaps = (driver.lapDetails ?? []).filter(
-    (lap) =>
-      lap.isRepresentative &&
-      lap.lapStatus === 'GREEN' &&
-      !lap.isPitLap &&
-      !lap.isPitOutLap &&
-      Number.isFinite(lap.lapTime),
-  );
+function filterLapObjectsByOutlierThreshold(laps) {
+  const candidateLaps = laps.filter((lap) => Number.isFinite(lap.lapTime));
 
   if (candidateLaps.length < 3) {
-    return new Set(candidateLaps.map((lap) => lap.lapNumber));
+    return candidateLaps;
   }
 
   const lapTimes = candidateLaps.map((lap) => lap.lapTime);
@@ -280,11 +263,42 @@ function buildCleanLapSelection(driver) {
   const mad = median(absoluteDeviations) || 0;
   const threshold = Math.max(mad * 3.5, 1.25);
 
-  return new Set(
-    candidateLaps
-      .filter((lap) => Math.abs(lap.lapTime - medianValue) <= threshold)
-      .map((lap) => lap.lapNumber),
+  return candidateLaps.filter((lap) => Math.abs(lap.lapTime - medianValue) <= threshold);
+}
+
+function representativeGreenLaps(driver) {
+  return (driver.lapDetails ?? []).filter(
+    (lap) =>
+      lap.isRepresentative &&
+      lap.lapStatus === 'GREEN' &&
+      !lap.isPitLap &&
+      !lap.isPitOutLap &&
+      Number.isFinite(lap.lapTime),
   );
+}
+
+function filteredGreenLapTimes(driver) {
+  return filterLapObjectsByOutlierThreshold(representativeGreenLaps(driver)).map((lap) => lap.lapTime);
+}
+
+function buildCleanLapSelection(driver) {
+  return new Set(filterLapObjectsByOutlierThreshold(representativeGreenLaps(driver)).map((lap) => lap.lapNumber));
+}
+
+function filterNumericOutlierObjects(items, valueSelector) {
+  const numericItems = items.filter((item) => Number.isFinite(valueSelector(item)));
+
+  if (numericItems.length < 3) {
+    return numericItems;
+  }
+
+  const values = numericItems.map(valueSelector);
+  const medianValue = median(values);
+  const absoluteDeviations = values.map((value) => Math.abs(value - medianValue));
+  const mad = median(absoluteDeviations) || 0;
+  const threshold = Math.max(mad * 3.5, 1.5);
+
+  return numericItems.filter((item) => Math.abs(valueSelector(item) - medianValue) <= threshold);
 }
 
 const defaultLegend = {
@@ -313,19 +327,75 @@ const defaultTooltip = {
 
 function compoundColor(compound) {
   switch (compound) {
-    case 'SOFT':
-      return '#ff667a';
-    case 'MEDIUM':
-      return chartTokens.amber;
     case 'HARD':
       return '#e6edf7';
+    case 'MEDIUM':
+      return chartTokens.amber;
+    case 'SOFT':
+      return '#ff667a';
     case 'INTERMEDIATE':
       return '#53ca90';
     case 'WET':
       return '#4eb8ff';
+    case 'UNKNOWN':
+      return '#94a3b8';
     default:
       return '#9ca3af';
   }
+}
+
+function compoundOrder(compound) {
+  switch (compound) {
+    case 'HARD':
+      return 1;
+    case 'MEDIUM':
+      return 2;
+    case 'SOFT':
+      return 3;
+    case 'INTERMEDIATE':
+      return 4;
+    case 'WET':
+      return 5;
+    case 'UNKNOWN':
+      return 6;
+    default:
+      return 7;
+  }
+}
+
+function buildLapTicks(totalLaps) {
+  return {
+    color: chartTokens.muted,
+    autoSkip: false,
+    maxRotation: 0,
+    minRotation: 0,
+    callback(value) {
+      const lap = Number(value);
+
+      if (!Number.isFinite(lap)) {
+        return value;
+      }
+
+      if (totalLaps <= 12) {
+        return lap;
+      }
+
+      if (totalLaps <= 24) {
+        return lap <= 9 || lap % 2 === 0 ? lap : '';
+      }
+
+      return lap <= 9 || lap % 5 === 0 ? lap : '';
+    },
+  };
+}
+
+function verticalCategoryTicks() {
+  return {
+    color: chartTokens.muted,
+    autoSkip: false,
+    minRotation: 90,
+    maxRotation: 90,
+  };
 }
 
 function formatTickValue(value, unit, kind = 'time') {
@@ -467,6 +537,12 @@ export function mountPositionChart(canvas, session) {
       },
       scales: {
         ...baseScales(),
+        x: {
+          ticks: buildLapTicks(session.lapAxis.length),
+          grid: {
+            display: false,
+          },
+        },
         y: {
           reverse: true,
           min: 1,
@@ -533,14 +609,7 @@ export function mountGapChart(canvas, session) {
       scales: {
         ...baseScales(),
         x: {
-          ticks: {
-            color: chartTokens.muted,
-            autoSkip: false,
-            maxRotation: 0,
-            font: {
-              size: 10,
-            },
-          },
+          ticks: buildLapTicks(session.lapAxis.length),
           grid: {
             display: false,
           },
@@ -595,11 +664,7 @@ export function mountSpeedChart(canvas, session) {
       scales: {
         ...baseScales(),
         x: {
-          ticks: {
-            color: chartTokens.muted,
-            autoSkip: false,
-            maxRotation: 0,
-          },
+          ticks: verticalCategoryTicks(),
           grid: {
             display: false,
           },
@@ -657,16 +722,17 @@ function buildCompoundStatsFromDrivers(drivers) {
       const bucket = statsByCompound.get(stint.compound) ?? [];
       bucket.push({
         value: stint.length,
-        color: driverColor(driver.teamColour),
+        color: compoundColor(stint.compound ?? 'UNKNOWN'),
       });
       statsByCompound.set(stint.compound, bucket);
     }
   }
 
-  return [...statsByCompound.entries()].map(([compound, samples]) => {
-    const lengths = samples.map((sample) => sample.value);
-    const sorted = [...lengths].sort((left, right) => left - right);
-    const mean = sorted.reduce((sum, value) => sum + value, 0) / sorted.length;
+  return [...statsByCompound.entries()]
+    .map(([compound, samples]) => {
+      const lengths = samples.map((sample) => sample.value);
+      const sorted = [...lengths].sort((left, right) => left - right);
+      const mean = sorted.reduce((sum, value) => sum + value, 0) / sorted.length;
     const variance =
       sorted.reduce((sum, value) => sum + (value - mean) * (value - mean), 0) / sorted.length;
     const standardDeviation = Math.sqrt(variance);
@@ -686,22 +752,24 @@ function buildCompoundStatsFromDrivers(drivers) {
       return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
     };
 
-    return {
-      compound,
-      lapsCompleted: sorted.reduce((sum, value) => sum + value, 0),
-      min: sorted[0],
-      q1: interpolate(0.25),
-      median: interpolate(0.5),
-      q3: interpolate(0.75),
-      max: sorted[sorted.length - 1],
-      mean,
-      standardDeviation,
-      samples: samples.map((sample) => ({
-        ...sample,
-        isOutlier: Math.abs(sample.value - mean) > standardDeviation,
-      })),
-    };
-  });
+      return {
+        compound: compound ?? 'UNKNOWN',
+        color: compoundColor(compound ?? 'UNKNOWN'),
+        lapsCompleted: sorted.reduce((sum, value) => sum + value, 0),
+        min: sorted[0],
+        q1: interpolate(0.25),
+        median: interpolate(0.5),
+        q3: interpolate(0.75),
+        max: sorted[sorted.length - 1],
+        mean,
+        standardDeviation,
+        samples: samples.map((sample) => ({
+          ...sample,
+          isOutlier: Math.abs(sample.value - mean) > standardDeviation,
+        })),
+      };
+    })
+    .sort((left, right) => compoundOrder(left.compound) - compoundOrder(right.compound));
 }
 
 export function mountTyreBoxPlotChart(canvas, session) {
@@ -798,11 +866,7 @@ function mountStopsChart(canvas, session, metricKey, chartLabel, valueFormatter)
       scales: {
         ...baseScales(),
         x: {
-          ticks: {
-            color: chartTokens.muted,
-            autoSkip: false,
-            maxRotation: 0,
-          },
+          ticks: verticalCategoryTicks(),
           grid: {
             display: false,
           },
@@ -821,15 +885,16 @@ function mountStopsChart(canvas, session, metricKey, chartLabel, valueFormatter)
     chart,
     sync(visibleNumbers) {
       const drivers = visibleDrivers(session.drivers, visibleNumbers);
-      const stops = drivers.flatMap((driver) =>
+      const rawStops = drivers.flatMap((driver) =>
         (driver.pitStops ?? [])
           .filter((pitStop) => Number.isFinite(pitStop[metricKey]))
           .map((pitStop) => ({
-            label: [driver.code, `L${pitStop.lapNumber}`],
+            label: `${driver.code} L${pitStop.lapNumber}`,
             value: pitStop[metricKey],
             color: driverColor(driver.teamColour),
           })),
       );
+      const stops = filterNumericOutlierObjects(rawStops, (stop) => stop.value);
       const values = stops.map((stop) => stop.value);
       const averageValue = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
       const variance =
@@ -932,11 +997,7 @@ export function mountLapTimeEvolutionChart(canvas, session) {
       scales: {
         ...baseScales(),
         x: {
-          ticks: {
-            color: chartTokens.muted,
-            autoSkip: false,
-            maxRotation: 0,
-          },
+          ticks: buildLapTicks(session.lapAxis.length),
           grid: {
             display: false,
           },
@@ -962,26 +1023,35 @@ export function mountLapTimeEvolutionChart(canvas, session) {
     sync(visibleNumbers) {
       currentVisibleNumbers = new Set(visibleNumbers);
       const drivers = visibleDrivers(session.drivers, visibleNumbers);
+      const cleanSelections =
+        filterMode === 'clean'
+          ? new Map(drivers.map((driver) => [driver.driverNumber, buildCleanLapSelection(driver)]))
+          : new Map();
       const datasets = drivers.map((driver) => {
-        const cleanLaps = filterMode === 'clean' ? buildCleanLapSelection(driver) : null;
-
-        return buildLineDataset(
-          driver,
-          session.lapAxis.map((lapNumber) => {
-            const lap = driver.lapDetails.find((item) => item.lapNumber === lapNumber);
-            return {
-              lapNumber,
-              lapTime:
-                !lap || (filterMode === 'clean' && !cleanLaps.has(lapNumber)) ? null : (lap?.lapTime ?? null),
-            };
-          }),
-          'lapTime',
-        );
+        return {
+          ...buildLineDataset(
+            driver,
+            session.lapAxis.map((lapNumber) => {
+              const lap = driver.lapDetails.find((item) => item.lapNumber === lapNumber);
+              return {
+                lapNumber,
+                lapTime: lap?.lapTime ?? null,
+              };
+            }),
+            'lapTime',
+          ),
+          tension: 0,
+        };
       });
-      const range = computeRange(
-        datasets.flatMap((dataset) => dataset.data).filter(Number.isFinite),
-        0.08,
-      );
+      const rangeSource =
+        filterMode === 'clean'
+          ? drivers.flatMap((driver) =>
+              (driver.lapDetails ?? [])
+                .filter((lap) => cleanSelections.get(driver.driverNumber)?.has(lap.lapNumber))
+                .map((lap) => lap.lapTime),
+            )
+          : datasets.flatMap((dataset) => dataset.data).filter(Number.isFinite);
+      const range = computeRange(rangeSource, 0.08);
 
       chart.options.scales.y.min = range.min;
       chart.options.scales.y.max = range.max;
@@ -1038,13 +1108,25 @@ export function mountStintPaceChart(canvas, session) {
     sync(visibleNumbers) {
       const rows = visibleDrivers(session.drivers, visibleNumbers)
         .flatMap((driver) =>
-          (driver.stintPerformance ?? [])
-            .filter((stint) => Number.isFinite(stint.averageLapTime))
-            .map((stint) => ({
-              label: `${driver.code} S${stint.stintNumber} ${stint.compound?.slice?.(0, 1) ?? '?'}`,
-              value: stint.averageLapTime,
-              color: compoundColor(stint.compound),
-            })),
+          [...new Set((driver.lapDetails ?? []).map((lap) => lap.stintNumber).filter(Number.isFinite))]
+            .map((stintNumber) => {
+              const filteredLaps = filterLapObjectsByOutlierThreshold(
+                (driver.lapDetails ?? []).filter(
+                  (lap) => lap.stintNumber === stintNumber && lap.isRepresentative && Number.isFinite(lap.lapTime),
+                ),
+              );
+
+              if (!filteredLaps.length) {
+                return null;
+              }
+
+              return {
+                label: `${driver.code} S${stintNumber} ${filteredLaps[0].compound?.slice?.(0, 1) ?? '?'}`,
+                value: average(filteredLaps.map((lap) => lap.lapTime)),
+                color: compoundColor(filteredLaps[0].compound ?? 'UNKNOWN'),
+              };
+            })
+            .filter(Boolean),
         )
         .sort((left, right) => left.value - right.value);
       const range = computeRange(rows.map((row) => row.value), 0.08);
@@ -1090,6 +1172,12 @@ export function mountTyreDegradationChart(canvas, session) {
       },
       scales: {
         ...baseScales(),
+        x: {
+          ticks: verticalCategoryTicks(),
+          grid: {
+            display: false,
+          },
+        },
         y: {
           ticks: buildTicks('s'),
           grid: {
@@ -1110,14 +1198,25 @@ export function mountTyreDegradationChart(canvas, session) {
           const byAge = new Map();
 
           for (const driver of drivers) {
-            for (const lap of driver.lapDetails ?? []) {
-              if (!lap.isRepresentative || lap.compound !== compound || !Number.isFinite(lap.tyreAge) || !Number.isFinite(lap.lapTime)) {
-                continue;
-              }
+            const stintNumbers = [...new Set((driver.lapDetails ?? []).map((lap) => lap.stintNumber).filter(Number.isFinite))];
 
-              const bucket = byAge.get(lap.tyreAge) ?? [];
-              bucket.push(lap.lapTime);
-              byAge.set(lap.tyreAge, bucket);
+            for (const stintNumber of stintNumbers) {
+              const filteredLaps = filterLapObjectsByOutlierThreshold(
+                (driver.lapDetails ?? []).filter(
+                  (lap) =>
+                    lap.stintNumber === stintNumber &&
+                    lap.isRepresentative &&
+                    lap.compound === compound &&
+                    Number.isFinite(lap.tyreAge) &&
+                    Number.isFinite(lap.lapTime),
+                ),
+              );
+
+              for (const lap of filteredLaps) {
+                const bucket = byAge.get(lap.tyreAge) ?? [];
+                bucket.push(lap.lapTime);
+                byAge.set(lap.tyreAge, bucket);
+              }
             }
           }
 
@@ -1330,6 +1429,12 @@ export function mountBestSectorsChart(canvas, session) {
       },
       scales: {
         ...baseScales(),
+        x: {
+          ticks: verticalCategoryTicks(),
+          grid: {
+            display: false,
+          },
+        },
         y: {
           ticks: buildTicks('s'),
           grid: {

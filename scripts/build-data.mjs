@@ -103,6 +103,24 @@ function median(values) {
   return quantile([...values].sort((left, right) => left - right), 0.5);
 }
 
+function filterLapTimeOutliers(laps, valueSelector = (lap) => lap.lapTime) {
+  const values = laps.map(valueSelector).filter(Number.isFinite);
+
+  if (values.length < 3) {
+    return laps.filter((lap) => Number.isFinite(valueSelector(lap)));
+  }
+
+  const medianValue = median(values);
+  const absoluteDeviations = values.map((value) => Math.abs(value - medianValue));
+  const mad = median(absoluteDeviations) ?? 0;
+  const threshold = Math.max(mad * 3.5, 1.5);
+
+  return laps.filter((lap) => {
+    const value = valueSelector(lap);
+    return Number.isFinite(value) && Math.abs(value - medianValue) <= threshold;
+  });
+}
+
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value));
 }
@@ -508,6 +526,13 @@ function buildTransparency(summary) {
       note: 'Derived from the compounds present in recorded stints, so only compounds actually used in the session are shown.',
     },
     {
+      key: 'lap-times',
+      label: 'Lap time evolution',
+      availability: 'direct',
+      note:
+        'Lap times are shown from the raw OpenF1 lap feed. The clean-lap view only tightens the axis range around representative green laps and does not replace the plotted values.',
+    },
+    {
       key: 'pit-stop-duration',
       label: 'Pit stop duration',
       availability: summary.totalPitStops ? 'direct' : 'unavailable',
@@ -540,7 +565,7 @@ function buildTransparency(summary) {
       label: 'Start gain / loss',
       availability: 'inferred',
       note:
-        'Starting order is inferred from the earliest recorded session positions, then compared with the position at the end of lap 1.',
+        'Starting order is inferred from the earliest recorded session positions, then compared with lap 1 when available, otherwise with the first classified opening-phase position sample.',
     },
   ];
 }
@@ -985,10 +1010,11 @@ async function main() {
         const topSpeed = driverLaps.reduce((maximum, lap) => Math.max(maximum, lap.st_speed ?? 0), 0) || null;
         const resultData = buildDriverResult(result);
         const representativeLaps = lapDetails.filter((lap) => lap.isRepresentative && Number.isFinite(lap.lapTime));
-        const averageGreenLap = average(representativeLaps.map((lap) => lap.lapTime));
-        const greenLapTimeStdDev = standardDeviation(representativeLaps.map((lap) => lap.lapTime));
-        const bestLapSource = representativeLaps.length
-          ? representativeLaps.reduce((best, lap) => (lap.lapTime < best.lapTime ? lap : best), representativeLaps[0])
+        const filteredRepresentativeLaps = filterLapTimeOutliers(representativeLaps);
+        const averageGreenLap = average(filteredRepresentativeLaps.map((lap) => lap.lapTime));
+        const greenLapTimeStdDev = standardDeviation(filteredRepresentativeLaps.map((lap) => lap.lapTime));
+        const bestLapSource = filteredRepresentativeLaps.length
+          ? filteredRepresentativeLaps.reduce((best, lap) => (lap.lapTime < best.lapTime ? lap : best), filteredRepresentativeLaps[0])
           : null;
         const bestSectors = {
           sector1: Math.min(...lapDetails.map((lap) => lap.sector1).filter(Number.isFinite), Infinity),
@@ -997,7 +1023,9 @@ async function main() {
         };
         const referenceLap = selectReferenceLap(driverLaps, lapStatus, pitStopsByLap);
         const firstPositionSample = driverPositions[0]?.position ?? null;
-        const lap1Position = sampledPositions.find((entry) => entry.lap === 1)?.value ?? null;
+        const openingPhaseSample = sampledPositions.find((entry) => Number.isFinite(entry.value)) ?? null;
+        const lap1Position = sampledPositions.find((entry) => entry.lap === 1)?.value ?? openingPhaseSample?.value ?? null;
+        const comparisonLap = sampledPositions.find((entry) => entry.lap === 1)?.value ? 1 : (openingPhaseSample?.lap ?? null);
         const championship = championshipSnapshots.get(session.session_key)?.get(driverNumber) ?? {
           eventPoints: resultData.points,
           pointsBefore: null,
@@ -1028,7 +1056,9 @@ async function main() {
           };
         });
         const stintPerformance = stints.map((stint) => {
-          const stintLaps = lapDetails.filter((lap) => lap.stintNumber === stint.stintNumber && lap.isRepresentative);
+          const stintLaps = filterLapTimeOutliers(
+            lapDetails.filter((lap) => lap.stintNumber === stint.stintNumber && lap.isRepresentative),
+          );
           const degradationSlope = linearRegression(
             stintLaps
               .filter((lap) => Number.isFinite(lap.tyreAge) && Number.isFinite(lap.lapTime))
@@ -1063,6 +1093,7 @@ async function main() {
           start: {
             gridPosition: firstPositionSample,
             lap1Position,
+            comparisonLap,
             gainLoss:
               Number.isFinite(firstPositionSample) && Number.isFinite(lap1Position)
                 ? firstPositionSample - lap1Position
@@ -1082,9 +1113,9 @@ async function main() {
             sector3: Number.isFinite(bestSectors.sector3) ? bestSectors.sector3 : null,
           },
           consistency: {
-            greenLapCount: representativeLaps.length,
+            greenLapCount: filteredRepresentativeLaps.length,
             averageLapTime: averageGreenLap,
-            lapTimeStdDev: representativeLaps.length ? greenLapTimeStdDev : null,
+            lapTimeStdDev: filteredRepresentativeLaps.length ? greenLapTimeStdDev : null,
           },
           positionsByLap: sampledPositions.map((entry) => ({
             lap: entry.lap,
