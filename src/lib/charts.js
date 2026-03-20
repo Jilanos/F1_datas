@@ -468,6 +468,25 @@ function buildLineDataset(driver, series, valueKey, labelSuffix = '') {
   };
 }
 
+function driverInitials(driver) {
+  if (driver?.code) {
+    return driver.code;
+  }
+
+  const parts = String(driver?.fullName ?? '')
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (!parts.length) {
+    return '?';
+  }
+
+  return parts
+    .slice(0, 3)
+    .map((part) => part[0]?.toUpperCase?.() ?? '')
+    .join('');
+}
+
 function sortByResult(drivers) {
   return [...drivers].sort((left, right) => {
     const leftPosition = left.result?.position ?? 999;
@@ -571,7 +590,7 @@ export function mountPositionChart(canvas, session) {
         session.lapAxis,
         drivers.map((driver) => ({
           ...buildLineDataset(driver, driver.positionsByLap, 'position'),
-          endLabel: driver.fullName?.split?.(' ')?.slice?.(-1)?.[0] ?? driver.code,
+          endLabel: driverInitials(driver),
         })),
       );
     },

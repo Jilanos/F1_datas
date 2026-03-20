@@ -1,4 +1,5 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 const OPEN_F1_BASE_URL = 'https://api.openf1.org/v1';
@@ -6,12 +7,40 @@ const rootDir = process.cwd();
 const outputDir = path.resolve(rootDir, 'public', 'data');
 const grandPrixDir = path.resolve(outputDir, 'grands-prix');
 const sprintDir = path.resolve(outputDir, 'sprints');
+const openF1CacheDir = path.resolve(rootDir, '.cache', 'openf1');
 const now = new Date();
 const maxSessionsPerType = Number.parseInt(process.env.MAX_SESSIONS_PER_TYPE ?? process.env.MAX_RACES ?? '5', 10);
 const requestIntervalMs = Number.parseInt(process.env.OPENF1_MIN_INTERVAL_MS ?? '360', 10);
 const telemetryBinCount = 100;
+const cliArgs = new Set(process.argv.slice(2));
+const openF1CacheMode = resolveCacheMode(cliArgs, process.env.OPENF1_CACHE_MODE);
+const shouldReadFromCache = openF1CacheMode === 'cache-only' || openF1CacheMode === 'prefer-cache';
+const shouldWriteToCache = openF1CacheMode !== 'cache-only';
 
 let lastRequestStartedAt = 0;
+
+function resolveCacheMode(args, envValue = '') {
+  if (args.has('--cache-only')) {
+    return 'cache-only';
+  }
+
+  if (args.has('--prefer-cache')) {
+    return 'prefer-cache';
+  }
+
+  if (args.has('--refresh-cache')) {
+    return 'refresh';
+  }
+
+  const normalized = String(envValue || 'refresh').trim().toLowerCase();
+  const allowedModes = new Set(['refresh', 'prefer-cache', 'cache-only']);
+
+  if (!allowedModes.has(normalized)) {
+    throw new Error(`Unsupported OPENF1_CACHE_MODE "${envValue}". Expected refresh, prefer-cache, or cache-only.`);
+  }
+
+  return normalized;
+}
 
 function formatDate(isoString) {
   return new Intl.DateTimeFormat('en-GB', {
@@ -28,6 +57,63 @@ function slugify(value) {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
+
+function normalizeOpenF1Params(params = {}) {
+  return Object.entries(params)
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey));
+}
+
+function buildCacheFilePath(endpoint, params = {}) {
+  const normalizedParams = normalizeOpenF1Params(params);
+  const descriptor =
+    normalizedParams
+      .map(([key, value]) => `${slugify(key)}-${slugify(String(value)).slice(0, 32)}`)
+      .join('__') || 'all';
+  const digest = createHash('sha1')
+    .update(`${endpoint}|${JSON.stringify(normalizedParams)}`)
+    .digest('hex')
+    .slice(0, 12);
+
+  return path.resolve(openF1CacheDir, endpoint, `${descriptor}__${digest}.json`);
+}
+
+async function readCachedOpenF1Response(endpoint, params = {}) {
+  const cachePath = buildCacheFilePath(endpoint, params);
+
+  try {
+    const raw = await readFile(cachePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed.payload ?? parsed;
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+async function writeCachedOpenF1Response(endpoint, params, url, payload) {
+  const cachePath = buildCacheFilePath(endpoint, params);
+
+  await mkdir(path.dirname(cachePath), { recursive: true });
+  await writeFile(
+    cachePath,
+    `${JSON.stringify(
+      {
+        endpoint,
+        params: Object.fromEntries(normalizeOpenF1Params(params)),
+        url,
+        fetchedAt: new Date().toISOString(),
+        payload,
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  );
 }
 
 function toMillis(isoString) {
@@ -211,6 +297,18 @@ async function fetchOpenF1(endpoint, params = {}) {
     }
   }
 
+  if (shouldReadFromCache) {
+    const cachedPayload = await readCachedOpenF1Response(endpoint, params);
+
+    if (cachedPayload !== null) {
+      return cachedPayload;
+    }
+
+    if (openF1CacheMode === 'cache-only') {
+      throw new Error(`OpenF1 cache miss for ${endpoint} ${JSON.stringify(params)}`);
+    }
+  }
+
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const nowMs = Date.now();
     const waitMs = Math.max(0, lastRequestStartedAt + requestIntervalMs - nowMs);
@@ -223,7 +321,13 @@ async function fetchOpenF1(endpoint, params = {}) {
     const response = await fetch(url);
 
     if (response.ok) {
-      return response.json();
+      const payload = await response.json();
+
+      if (shouldWriteToCache) {
+        await writeCachedOpenF1Response(endpoint, params, url.toString(), payload);
+      }
+
+      return payload;
     }
 
     if (response.status === 429 && attempt < 4) {
@@ -885,6 +989,7 @@ async function buildSpeedMetrics(sessionKey, driverCards) {
 }
 
 async function main() {
+  console.info(`OpenF1 cache mode: ${openF1CacheMode}`);
   await rm(outputDir, { recursive: true, force: true });
   await mkdir(grandPrixDir, { recursive: true });
   await mkdir(sprintDir, { recursive: true });

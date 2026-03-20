@@ -18,6 +18,14 @@ You can use it in two ways:
 
 ## Install
 
+PowerShell:
+
+```powershell
+npm.cmd install
+```
+
+Git Bash / WSL:
+
 ```bash
 npm install
 ```
@@ -29,13 +37,25 @@ npm install
 Fast UI loop:
 
 ```powershell
-npm run dev:ui
+npm.cmd run dev:ui
 ```
 
 Full refresh with data rebuild:
 
 ```powershell
-npm run dev
+npm.cmd run dev
+```
+
+Offline rebuild from cached OpenF1 responses:
+
+```powershell
+npm.cmd run build:data:cached
+```
+
+Dataset validation:
+
+```powershell
+npm.cmd run validate:data
 ```
 
 ### Git Bash / WSL
@@ -108,6 +128,22 @@ Or in bash:
 npm run build:ui
 ```
 
+### Rebuild data from the local OpenF1 cache only
+
+```bash
+npm run build:data:cached
+```
+
+Use this after a successful online `build:data` run has already populated `.cache/openf1/`.
+
+### Validate generated datasets
+
+```bash
+npm run validate:data
+```
+
+This checks that generated static JSON still contains the core analytics structures for one representative Grand Prix and one representative Sprint session.
+
 ### Preview the production build
 
 ```bash
@@ -132,6 +168,7 @@ Use:
 
 ```bash
 npm run build:data
+npm run validate:data
 npm run build:pages
 npm run dev:ui
 ```
@@ -176,6 +213,9 @@ Meaning:
 
 ## Notes
 
-- `npm run build` is the complete pipeline and can take longer because it regenerates data.
+- In PowerShell, prefer `npm.cmd` instead of `npm` if script execution is blocked by `npm.ps1`.
+- `npm run build` is the complete pipeline and can take longer because it regenerates data and validates the generated datasets.
 - `npm run dev:ui` is the best option for most front-end tweaks.
+- `npm run build:data` refreshes from OpenF1 and updates the local cache under `.cache/openf1/`.
+- `npm run build:data:cached` rebuilds using cached OpenF1 responses only and fails on missing cache entries.
 - If charts look stale after a new weekend, refresh the data first with `npm run build:data`.
