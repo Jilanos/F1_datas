@@ -3,3 +3,4 @@ node_modules/
 public/data/
 grands-prix/
 .cache/
+.codex-dev.log
